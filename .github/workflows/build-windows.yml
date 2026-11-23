@@ -1,0 +1,57 @@
+name: Windows build
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+    branches: [main]
+    paths-ignore: ['downloads/**']
+permissions:
+  contents: write
+concurrency:
+  group: chunpdf-windows-build
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          architecture: x64
+      - run: python -m pip install -r requirements.txt
+      - run: python build.py
+      - name: Verify clean installation and uninstallation
+        shell: pwsh
+        run: |
+          $installDir = Join-Path $env:RUNNER_TEMP "chunPDF-install-test"
+          $setup = Start-Process -Wait -PassThru -FilePath build/installer/chunPDF-Setup-x64.exe -ArgumentList "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /NOICONS /DIR=`"$installDir`""
+          if ($setup.ExitCode -ne 0) { throw "Installer failed" }
+          $app = Start-Process -Wait -PassThru -FilePath (Join-Path $installDir "chunPDF.exe") -ArgumentList "--self-test"
+          if ($app.ExitCode -ne 0) { throw "Installed application failed" }
+          $remove = Start-Process -Wait -PassThru -FilePath (Join-Path $installDir "unins000.exe") -ArgumentList "/VERYSILENT /NORESTART"
+          if ($remove.ExitCode -ne 0 -or (Test-Path (Join-Path $installDir "chunPDF.exe"))) { throw "Uninstallation failed" }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: chunPDF-windows-x64
+          path: downloads/*
+      - name: Publish verified ZIPs to main
+        if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        run: |
+          git fetch origin main
+          if ((git rev-parse HEAD) -ne (git rev-parse origin/main)) {
+            Write-Output "Source is not the current main revision. ZIPs are available as Actions artifacts."
+            exit 0
+          }
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- downloads
+          git diff --cached --quiet
+          if ($LASTEXITCODE -eq 0) { exit 0 }
+          git commit -m "Update Windows distributions"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          git push origin HEAD:main
+

@@ -1,0 +1,7 @@
+PyMuPDF==1.26.7
+Pillow==11.2.1
+tkinterdnd2==0.7.0
+pywin32==311
+PyInstaller==6.22.3
+pytest==9.2.0
+
